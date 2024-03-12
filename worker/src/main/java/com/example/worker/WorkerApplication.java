@@ -53,10 +53,9 @@ public class WorkerApplication {
         }
     }
 
-}
 
-@Configuration
-class WorkerConfiguration {
+    public record Customer(Long id, String name) {
+    }
 
     private final RowMapper<Customer> customerRowMapper =
             (rs, rowNum) -> new Customer(rs.getLong("id"), rs.getString("name"));
@@ -105,8 +104,6 @@ class WorkerConfiguration {
     }
 }
 
-record Customer(Long id, String name) {
-}
 
 @Configuration
 class IntegrationConfiguration {
@@ -122,23 +119,23 @@ class IntegrationConfiguration {
     }
 
     @Bean
-    IntegrationFlow outboundFlow(AmqpTemplate amqpTemplate) {
+    IntegrationFlow outboundFlow(MessageChannel replies, AmqpTemplate amqpTemplate) {
         return IntegrationFlow
-                .from(replies())
+                .from(replies)
                 .handle(Amqp.outboundAdapter(amqpTemplate).routingKey(
                         "replies"))
                 .get();
     }
 
     @Bean
-    IntegrationFlow inboundFlow(ConnectionFactory connectionFactory) {
+    IntegrationFlow inboundFlow(MessageChannel requests, ConnectionFactory connectionFactory) {
         var simpleMessageConverter = new SimpleMessageConverter();
         simpleMessageConverter.addAllowedListPatterns("*");
         return IntegrationFlow
                 .from(Amqp
                         .inboundAdapter(connectionFactory, "requests")
                         .messageConverter(simpleMessageConverter))
-                .channel(requests())
+                .channel(requests)
                 .get();
     }
 

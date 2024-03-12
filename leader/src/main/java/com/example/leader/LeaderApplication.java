@@ -50,10 +50,7 @@ public class LeaderApplication {
             hints.serialization().registerType(StepExecutionRequest.class);
         }
     }
-}
 
-@Configuration
-class LeaderConfiguration {
 
     @Bean
     Job remotePartitioningJob(JobRepository jobRepository, Step managerStep) {
@@ -73,30 +70,18 @@ class LeaderConfiguration {
 
         @Override
         public Map<String, ExecutionContext> partition(int gridSize) {
-
-            // let's create a table with our buckets
-
             var bucketsDdl = """
                     insert into customer_job_buckets( id, bucket)  
                     SELECT id , 'partition' || NTILE(?) OVER (ORDER BY id ) AS bucket
                     FROM customer ;
                     """;
             this.db.sql(bucketsDdl).params(gridSize).update();
-
-            var count = (int) db.sql("select count(id) from customer").query(Integer.class).optional().orElse(0);
             var partitions = new HashMap<String, ExecutionContext>();
-            var itemsPerPartition = count / gridSize;
-            var extra = count % gridSize;
-            var end = itemsPerPartition - 1;
             for (var i = 0; i < gridSize; i++) {
                 var context = new ExecutionContext();
-                if (i == gridSize - 1) {
-                    end += extra; // add remainder to the last partition
-                }
                 var partitionName = "partition" + (i+1);
                 context.putString("partition", partitionName);
                 partitions.put(partitionName, context);
-                end += itemsPerPartition;
             }
             return partitions;
         }
@@ -125,20 +110,20 @@ class LeaderConfiguration {
 class IntegrationConfiguration {
 
     @Bean
-    IntegrationFlow inboundFlow(ConnectionFactory connectionFactory) {
+    IntegrationFlow inboundFlow(MessageChannel replies, ConnectionFactory connectionFactory) {
         var simpleMessageConverter = new SimpleMessageConverter();
         simpleMessageConverter.addAllowedListPatterns("*");
         return IntegrationFlow
                 .from(Amqp.inboundAdapter(connectionFactory, "replies")
                         .messageConverter(simpleMessageConverter))
-                .channel(replies())
+                .channel(replies)
                 .get();
     }
 
     @Bean
-    IntegrationFlow outboundFlow(AmqpTemplate amqpTemplate) {
+    IntegrationFlow outboundFlow(MessageChannel requests, AmqpTemplate amqpTemplate) {
         return IntegrationFlow
-                .from(requests())
+                .from(requests)
                 .handle(Amqp.outboundAdapter(amqpTemplate).routingKey("requests"))
                 .get();
     }
@@ -159,13 +144,10 @@ class IntegrationConfiguration {
 @Configuration
 class RabbitMqConfiguration {
 
-    private final String[] destinationNames = "requests,replies"
-            .split(",");
-
     @Bean
     InitializingBean rabbitMqInitializer(AmqpAdmin amqp) {
         return () -> {
-            for (var qName : destinationNames) {
+            for (var qName : "requests,replies".split(",")) {
                 var exchange = ExchangeBuilder.directExchange(qName).build();
                 var q = QueueBuilder.durable(qName).build();
                 var binding = BindingBuilder
