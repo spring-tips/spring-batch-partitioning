@@ -1,10 +1,10 @@
-package bootiful.batch.leader;
+package com.example.worker;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 
 @SpringBootTest
-class LeaderApplicationTests {
+class WorkerApplicationTests {
 
 	@Test
 	void contextLoads() {
