@@ -101,7 +101,7 @@ class LeaderConfiguration {
     @Bean
     Step managerStep() {
         return this.remotePartitioningManagerStepBuilder
-                .partitioner("workerStep", new BasicPartitioner())
+                .partitioner("workerStep", new SimplePartitioner())
                 .gridSize(GRID_SIZE)
                 .outputChannel(requests())
                 .inputChannel(replies())
@@ -117,21 +117,7 @@ class LeaderConfiguration {
     }
 }
 
-class BasicPartitioner extends SimplePartitioner {
 
-    private static final String PARTITION_KEY = "partition";
-
-    @Override
-    public Map<String, ExecutionContext> partition(int gridSize) {
-        var partitions = super.partition(gridSize);
-        var i = 0;
-        for (var context : partitions.values()) {
-            context.put(PARTITION_KEY, PARTITION_KEY + (i++));
-        }
-        return partitions;
-    }
-
-}
 
 @Configuration
 class RabbitConfiguration {
