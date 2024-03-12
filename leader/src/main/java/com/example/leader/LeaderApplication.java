@@ -3,13 +3,18 @@ package com.example.leader;
 import org.springframework.amqp.core.*;
 import org.springframework.amqp.rabbit.connection.ConnectionFactory;
 import org.springframework.amqp.support.converter.SimpleMessageConverter;
+import org.springframework.aot.hint.MemberCategory;
+import org.springframework.aot.hint.RuntimeHints;
+import org.springframework.aot.hint.RuntimeHintsRegistrar;
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.Step;
 import org.springframework.batch.core.job.builder.JobBuilder;
 import org.springframework.batch.core.launch.support.RunIdIncrementer;
 import org.springframework.batch.core.partition.support.Partitioner;
 import org.springframework.batch.core.repository.JobRepository;
+import org.springframework.batch.integration.partition.MessageChannelPartitionHandler;
 import org.springframework.batch.integration.partition.RemotePartitioningManagerStepBuilder;
+import org.springframework.batch.integration.partition.StepExecutionRequest;
 import org.springframework.batch.item.ExecutionContext;
 import org.springframework.beans.factory.BeanFactory;
 import org.springframework.beans.factory.InitializingBean;
@@ -17,6 +22,7 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.ImportRuntimeHints;
 import org.springframework.integration.amqp.dsl.Amqp;
 import org.springframework.integration.dsl.DirectChannelSpec;
 import org.springframework.integration.dsl.IntegrationFlow;
@@ -28,26 +34,26 @@ import java.util.HashMap;
 import java.util.Map;
 
 @SpringBootApplication
+@ImportRuntimeHints(LeaderApplication.Hints.class)
 public class LeaderApplication {
 
     public static void main(String[] args) {
         SpringApplication.run(LeaderApplication.class, args);
     }
 
+    static class Hints implements RuntimeHintsRegistrar {
+
+        @Override
+        public void registerHints(RuntimeHints hints, ClassLoader classLoader) {
+            var mcs = MemberCategory.values();
+            hints.reflection().registerType(MessageChannelPartitionHandler.class, mcs);
+            hints.serialization().registerType(StepExecutionRequest.class);
+        }
+    }
 }
 
 @Configuration
 class LeaderConfiguration {
-
-    private final RemotePartitioningManagerStepBuilder builder;
-
-    LeaderConfiguration(JobRepository repository,
-                        BeanFactory beanFactory) {
-        this.builder = new RemotePartitioningManagerStepBuilder(
-                "partitioningStep", repository)
-                .beanFactory(beanFactory);
-    }
-
 
     @Bean
     Job remotePartitioningJob(JobRepository jobRepository, Step managerStep) {
@@ -67,28 +73,34 @@ class LeaderConfiguration {
 
         @Override
         public Map<String, ExecutionContext> partition(int gridSize) {
-            // Example partition logic
-            var count = db.sql("select count(id) from customer").query(Integer.class).optional().orElse(0);
+
+            // let's create a table with our buckets
+
+            var bucketsDdl = """
+                    insert into customer_job_buckets( id, bucket)  
+                    SELECT id , 'partition' || NTILE(?) OVER (ORDER BY id ) AS bucket
+                    FROM customer ;
+                    """;
+            this.db.sql(bucketsDdl).params(gridSize).update();
+
+            var count = (int) db.sql("select count(id) from customer").query(Integer.class).optional().orElse(0);
             var partitions = new HashMap<String, ExecutionContext>();
             var itemsPerPartition = count / gridSize;
             var extra = count % gridSize;
-            var start = db.sql("select min( id) from customer").query(Integer.class).optional().orElse(0);
             var end = itemsPerPartition - 1;
             for (var i = 0; i < gridSize; i++) {
                 var context = new ExecutionContext();
                 if (i == gridSize - 1) {
-                    end += extra; // Add the remainder to the last partition
+                    end += extra; // add remainder to the last partition
                 }
-                context.putInt("start", start);
-                context.putInt("end", end);
-                partitions.put("partition" + i, context);
-                start = end + 1;
+                var partitionName = "partition" + (i+1);
+                context.putString("partition", partitionName);
+                partitions.put(partitionName, context);
                 end += itemsPerPartition;
             }
             return partitions;
         }
     }
-
 
     @Bean
     RangePartitioner rangePartitioner(JdbcClient jdbcClient) {
@@ -96,8 +108,10 @@ class LeaderConfiguration {
     }
 
     @Bean
-    Step managerStep(MessageChannel requests, MessageChannel replies, RangePartitioner partitioner) {
-        return this.builder
+    Step managerStep(MessageChannel requests, MessageChannel replies, BeanFactory beanFactory,
+                     JobRepository repository, RangePartitioner partitioner) {
+        return new RemotePartitioningManagerStepBuilder("partitioningStep", repository)
+                .beanFactory(beanFactory)
                 .partitioner("workerStep", partitioner)
                 .gridSize(3)
                 .outputChannel(requests)
