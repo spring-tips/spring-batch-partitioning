@@ -9,17 +9,17 @@ For further reference, please consider the following sections:
 * [GraalVM Native Image Support](https://docs.spring.io/spring-boot/docs/3.2.3/reference/html/native-image.html#native-image)
 * [Spring Integration AMQP Module Reference Guide](https://docs.spring.io/spring-integration/reference/html/amqp.html)
 * [Spring Integration Test Module Reference Guide](https://docs.spring.io/spring-integration/reference/html/testing.html)
+* [Spring for RabbitMQ](https://docs.spring.io/spring-boot/docs/3.2.3/reference/htmlsingle/index.html#messaging.amqp)
+* [Docker Compose Support](https://docs.spring.io/spring-boot/docs/3.2.3/reference/htmlsingle/index.html#features.docker-compose)
 * [Spring Batch](https://docs.spring.io/spring-boot/docs/3.2.3/reference/htmlsingle/index.html#howto.batch)
 * [Spring Integration](https://docs.spring.io/spring-boot/docs/3.2.3/reference/htmlsingle/index.html#messaging.spring-integration)
-* [Docker Compose Support](https://docs.spring.io/spring-boot/docs/3.2.3/reference/htmlsingle/index.html#features.docker-compose)
-* [Spring for RabbitMQ](https://docs.spring.io/spring-boot/docs/3.2.3/reference/htmlsingle/index.html#messaging.amqp)
 
 ### Guides
 The following guides illustrate how to use some features concretely:
 
+* [Messaging with RabbitMQ](https://spring.io/guides/gs/messaging-rabbitmq/)
 * [Creating a Batch Service](https://spring.io/guides/gs/batch-processing/)
 * [Integrating Data](https://spring.io/guides/gs/integration/)
-* [Messaging with RabbitMQ](https://spring.io/guides/gs/messaging-rabbitmq/)
 
 ### Additional Links
 These additional references should also help you:

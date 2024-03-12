@@ -37,10 +37,6 @@ import java.util.Map;
 @ImportRuntimeHints(LeaderApplication.Hints.class)
 public class LeaderApplication {
 
-    public static void main(String[] args) {
-        SpringApplication.run(LeaderApplication.class, args);
-    }
-
     static class Hints implements RuntimeHintsRegistrar {
 
         @Override
@@ -51,73 +47,50 @@ public class LeaderApplication {
         }
     }
 
-
-    @Bean
-    Job remotePartitioningJob(JobRepository jobRepository, Step managerStep) {
-        return new JobBuilder("remotePartitioningJob", jobRepository)//
-                .incrementer(new RunIdIncrementer())//
-                .start(managerStep)//
-                .build();
+    public static void main(String[] args) {
+        SpringApplication.run(LeaderApplication.class, args);
     }
 
-    static class RangePartitioner implements Partitioner {
+
+    private static final int GRID_SIZE = 3;
+
+    static class SpringTipsPartitioner implements Partitioner {
 
         private final JdbcClient db;
 
-        RangePartitioner(JdbcClient db) {
+        SpringTipsPartitioner(JdbcClient db) {
             this.db = db;
         }
 
         @Override
         public Map<String, ExecutionContext> partition(int gridSize) {
-            var bucketsDdl = """
-                    insert into customer_job_buckets( id, bucket)  
-                    SELECT id , 'partition' || NTILE(?) OVER (ORDER BY id ) AS bucket
-                    FROM customer ;
+
+            var sql = """
+                                        
+                    insert into customer_job_buckets(customer_id, bucket)
+                    select id, 'partition' || NTILE(?) over (order by id) as bucket 
+                    from customer
                     """;
-            this.db.sql(bucketsDdl).params(gridSize).update();
+            this.db.sql(sql).params(gridSize).update();
+
             var partitions = new HashMap<String, ExecutionContext>();
             for (var i = 0; i < gridSize; i++) {
+                var partitionName = "partition" + (i + 1);
+
                 var context = new ExecutionContext();
-                var partitionName = "partition" + (i+1);
                 context.putString("partition", partitionName);
+
                 partitions.put(partitionName, context);
             }
+
             return partitions;
         }
+
     }
 
     @Bean
-    RangePartitioner rangePartitioner(JdbcClient jdbcClient) {
-        return new RangePartitioner(jdbcClient);
-    }
-
-    @Bean
-    Step managerStep(MessageChannel requests, MessageChannel replies, BeanFactory beanFactory,
-                     JobRepository repository, RangePartitioner partitioner) {
-        return new RemotePartitioningManagerStepBuilder("partitioningStep", repository)
-                .beanFactory(beanFactory)
-                .partitioner("workerStep", partitioner)
-                .gridSize(3)
-                .outputChannel(requests)
-                .inputChannel(replies)
-                .build();
-    }
-
-}
-
-@Configuration
-class IntegrationConfiguration {
-
-    @Bean
-    IntegrationFlow inboundFlow(MessageChannel replies, ConnectionFactory connectionFactory) {
-        var simpleMessageConverter = new SimpleMessageConverter();
-        simpleMessageConverter.addAllowedListPatterns("*");
-        return IntegrationFlow
-                .from(Amqp.inboundAdapter(connectionFactory, "replies")
-                        .messageConverter(simpleMessageConverter))
-                .channel(replies)
-                .get();
+    SpringTipsPartitioner partitioner(JdbcClient jdbcClient) {
+        return new SpringTipsPartitioner(jdbcClient);
     }
 
     @Bean
@@ -128,6 +101,15 @@ class IntegrationConfiguration {
                 .get();
     }
 
+    @Bean
+    IntegrationFlow inboundFlow(ConnectionFactory cf, MessageChannel replies) {
+        var converters = new SimpleMessageConverter();
+        converters.addAllowedListPatterns("*");
+        return IntegrationFlow
+                .from(Amqp.inboundAdapter(cf, "replies").messageConverter(converters))
+                .channel(replies)
+                .get();
+    }
 
     @Bean
     DirectChannelSpec requests() {
@@ -139,7 +121,29 @@ class IntegrationConfiguration {
         return MessageChannels.direct();
     }
 
+    @Bean
+    Step managerStep(JobRepository repository, BeanFactory beanFactory, Partitioner partitioner,
+                     MessageChannel requests, MessageChannel replies) {
+        return new RemotePartitioningManagerStepBuilder("managerStep", repository)
+                .beanFactory(beanFactory)
+                .partitioner("workerStep", partitioner)
+                .gridSize(GRID_SIZE)
+                .outputChannel(requests)
+                .inputChannel(replies)
+                .build();
+    }
+
+    @Bean
+    Job remotePartitioningJob(JobRepository repository, Step managerStep) {
+        return new JobBuilder("remotePartitioningJob", repository)
+                .incrementer(new RunIdIncrementer())
+                .start(managerStep)
+                .build();
+    }
+
+
 }
+
 
 @Configuration
 class RabbitMqConfiguration {

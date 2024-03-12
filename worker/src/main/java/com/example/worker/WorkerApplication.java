@@ -30,18 +30,17 @@ import org.springframework.integration.dsl.IntegrationFlow;
 import org.springframework.integration.dsl.MessageChannels;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.messaging.MessageChannel;
+import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import javax.sql.DataSource;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.util.Map;
 
-@ImportRuntimeHints(WorkerApplication.Hints.class)
 @SpringBootApplication
+@ImportRuntimeHints(WorkerApplication.Hints.class)
 public class WorkerApplication {
-
-    public static void main(String[] args) {
-        SpringApplication.run(WorkerApplication.class, args);
-    }
 
     static class Hints implements RuntimeHintsRegistrar {
 
@@ -53,41 +52,29 @@ public class WorkerApplication {
         }
     }
 
-
-    public record Customer(Long id, String name) {
+    public static void main(String[] args) {
+        SpringApplication.run(WorkerApplication.class, args);
     }
 
-    private final RowMapper<Customer> customerRowMapper =
-            (rs, rowNum) -> new Customer(rs.getLong("id"), rs.getString("name"));
 
-    @Bean
-    Step workerStep(
-            JobExplorer explorer,
-            JobRepository repository,
-            BeanFactory beanFactory,
-            PlatformTransactionManager transactionManager,
-            MessageChannel requests,
-            MessageChannel replies,
-            ItemReader<Customer> customerItemReader) {
+    public record Customer(Integer id, String name) {
+    }
 
-        return new RemotePartitioningWorkerStepBuilder("workerStep", repository)
-                .inputChannel(requests)
-                .outputChannel(replies)
-                .jobExplorer(explorer)
-                .beanFactory(beanFactory)
-                .<Customer, Customer>chunk(3, transactionManager)
-                .reader(customerItemReader)
-                .writer(chunk -> {
-                    for (var c : chunk.getItems())
-                        System.out.println(c.id() + ":" + c.name());
-                })
-                .build();
+    @Component
+    static class CustomerRowMapper implements RowMapper<Customer> {
+
+        @Override
+        public Customer mapRow(ResultSet rs, int rowNum) throws SQLException {
+            return new Customer(rs.getInt("id"),
+                    rs.getString("name"));
+        }
     }
 
     @Bean
     @StepScope
     JdbcPagingItemReader<Customer> itemReader(
             DataSource dataSource,
+            RowMapper<Customer> customerRowMapper,
             @Value("#{stepExecutionContext['partition']}") String partition
     ) {
         return new JdbcPagingItemReaderBuilder<Customer>()
@@ -95,15 +82,38 @@ public class WorkerApplication {
                 .name("itemReader")
                 .selectClause("SELECT *")
                 .fromClause("FROM customer")
-                .whereClause("WHERE id in (select b.id from customer_job_buckets b where b.bucket =  :partition ) ")
-                .parameterValues(Map.of("partition", partition ))
+                .whereClause("WHERE id in (select b.customer_id from customer_job_buckets b where b.bucket =  :partition ) ")
+                .parameterValues(Map.of("partition", partition))
                 .sortKeys(Map.of("id", Order.ASCENDING))
-                .rowMapper(this.customerRowMapper)
+                .rowMapper(customerRowMapper)
                 .pageSize(10) // Adjust based on your needs
                 .build();
     }
-}
 
+    @Bean
+    Step workerStep(JobRepository repository,
+                    MessageChannel requests,
+                    MessageChannel replies,
+                    BeanFactory beanFactory,
+                    PlatformTransactionManager txm,
+                    ItemReader<Customer> customerItemReader,
+                    JobExplorer explorer
+    ) {
+        return new RemotePartitioningWorkerStepBuilder("workerStep", repository)
+                .inputChannel(requests)
+                .outputChannel(replies)
+                .jobExplorer(explorer)
+                .beanFactory(beanFactory)
+                .<Customer, Customer>chunk(3, txm)
+                .reader(customerItemReader)
+                .writer(chunk -> {
+                    for (var c : chunk.getItems())
+                        System.out.println("got [" + c + "]");
+                })
+                .build();
+    }
+
+}
 
 @Configuration
 class IntegrationConfiguration {
@@ -122,8 +132,7 @@ class IntegrationConfiguration {
     IntegrationFlow outboundFlow(MessageChannel replies, AmqpTemplate amqpTemplate) {
         return IntegrationFlow
                 .from(replies)
-                .handle(Amqp.outboundAdapter(amqpTemplate).routingKey(
-                        "replies"))
+                .handle(Amqp.outboundAdapter(amqpTemplate).routingKey("replies"))
                 .get();
     }
 
@@ -132,8 +141,7 @@ class IntegrationConfiguration {
         var simpleMessageConverter = new SimpleMessageConverter();
         simpleMessageConverter.addAllowedListPatterns("*");
         return IntegrationFlow
-                .from(Amqp
-                        .inboundAdapter(connectionFactory, "requests")
+                .from(Amqp.inboundAdapter(connectionFactory, "requests")
                         .messageConverter(simpleMessageConverter))
                 .channel(requests)
                 .get();

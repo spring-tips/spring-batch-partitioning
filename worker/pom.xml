@@ -35,12 +35,6 @@
         </dependency>
 
         <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-docker-compose</artifactId>
-            <scope>runtime</scope>
-            <optional>true</optional>
-        </dependency>
-        <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
             <scope>runtime</scope>
@@ -61,13 +55,13 @@
             <scope>test</scope>
         </dependency>
         <dependency>
+            <groupId>org.springframework.batch</groupId>
+            <artifactId>spring-batch-integration</artifactId>
+        </dependency>
+        <dependency>
             <groupId>org.springframework.integration</groupId>
             <artifactId>spring-integration-test</artifactId>
             <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.batch</groupId>
-            <artifactId>spring-batch-integration</artifactId>
         </dependency>
     </dependencies>
 
@@ -83,8 +77,6 @@
             </plugin>
         </plugins>
     </build>
-
-
     <dependencyManagement>
         <dependencies>
             <dependency>
@@ -96,4 +88,5 @@
             </dependency>
         </dependencies>
     </dependencyManagement>
+
 </project>
